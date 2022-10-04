@@ -1,0 +1,814 @@
+---
+title: "DIA analysis report"
+date: "`r format(Sys.time(), '%d/%m/%y')`"
+output: 
+  html_document:
+    df_print: paged
+    highlight: tango
+    theme: sandstone
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+params:
+  data: NA
+  data_name: NA
+  metadata: NA
+  comp: NA
+  filter: NA
+  rm.samples: NA
+  rendered_by_shiny: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE)
+```
+
+```{r libraries, include=FALSE}
+
+library(readxl)
+library(readr)
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(pheatmap)
+library(reshape2)
+library(factoextra)
+library(limma)
+library(EnhancedVolcano)
+library(RColorBrewer)
+library(ggvenn)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(eulerr)
+library(stringr)
+library(tools)
+library(enrichplot)
+
+```
+
+```{r enrich.func}
+
+enrich_dotplot <- function(df, title){
+  
+  # Creates dotplot figure, similar to ClusterProfiler dotplot, for every GO that has a p.adjust value < 0.05
+  
+  if (nrow(filter(df, p.adjust < .05)) > 0){
+    
+    df$Description <- toTitleCase(df$Description)
+    
+    fig <- df %>% 
+      filter(p.adjust < .05) %>% 
+      slice(1:30) %>% 
+      separate(GeneRatio, c("v1", "v2"), convert = TRUE) %>% 
+      mutate(GeneRatio = v1/v2) %>% 
+      select(-v1,
+             -v2) %>% 
+      ggplot(aes(GeneRatio, reorder(Description, GeneRatio))) +
+      geom_point(aes(size = Count, color = p.adjust)) +
+      theme_bw() +
+      ylab("") +
+      scale_color_gradient(high = "blue", low = "red") +
+      ggtitle(title)
+    
+    return(fig)
+    
+  }
+  
+}
+```
+
+
+The source code is freely available at https://github.com/patmartinezb/DIA-report. For further inquiries please contact either proteomics-unit(at)helsinki.fi or patricia.martinez(at)ispasturias.es.
+
+# Data
+
+Load raw data:
+
+```{r raw}
+
+ext <- tools::file_ext(params$data_name)
+switch(ext,
+       raw = read_excel(params$data) %>% type_convert(),
+       raw = vroom(params$data, delim = "\t")
+      )
+
+colnames(raw) <- make.names(colnames(raw))
+
+if (length(params$rm.samples) == 0){
+  
+  raw <- raw
+  
+} else {
+  
+  raw <- raw %>% 
+    select(-all_of(params$rm.samples))
+  
+}
+
+raw
+```
+
+# Pre-processing data
+## Trimming
+
+Cleaning of column names. Additional cleaning of protein IDs and gene names, so that only the first one remains. In addition, there is a conversion of all 0 or infinite values into NAs (missing values), and a log2-transformation of the data.
+
+```{r clean}
+
+df <- raw %>%
+  mutate(Protein.Ids = sub(";.*", "", Protein.Ids),
+         Genes = sub(";.*", "", Genes),
+         across(where(is.numeric), na_if, 0),
+         across(where(is.numeric), na_if, Inf),
+         across(where(is.numeric), na_if, -Inf),
+         across(where(is.numeric), log2))
+
+df
+
+incProgress(1/4)
+```
+
+## Duplicates
+
+```{r duplicates}
+duplicates.names <- unique(df$Protein.Ids[which(duplicated(df$Protein.Ids))])
+
+# This a table of the duplicated proteins
+
+dup <- df[which(df$Protein.Ids %in% duplicates.names),]
+```
+
+When checking for any duplicate protein IDs (twice or more), `r length(duplicates.names)` duplicates pop up, as shown in the table below. 
+
+```{r filter.dup}
+dup
+
+df1 <- df
+
+df <- df %>% 
+  distinct(Protein.Ids, .keep_all = TRUE)
+```
+
+Going further, only the first appearance of those duplicated proteins will be considered in the analysis. The dataset goes from `r dim(df1)[1]` observed proteins, down to `r dim(df)[1]` proteins, after removing the duplicates:
+
+```{r show.df}
+df
+```
+
+# Metadata
+
+The uploaded metadata:
+
+```{r metadata}
+
+metadata <- read_excel(params$metadata)
+
+metadata <- as_tibble(apply(metadata, 2, make.names))
+
+if (length(params$rm.samples) == 0){
+  
+  metadata <- metadata
+  
+} else {
+  
+  metadata <- metadata %>% 
+    filter(!BioReplicate %in% params$rm.samples)
+  
+}
+
+metadata
+```
+
+# Quality control plotting
+## Number of proteins
+
+The following plots show the number of proteins detected per replicate and group, respectively.
+
+```{r qc}
+df_plot <- df %>%
+  select(Protein.Ids,
+         matches(metadata$BioReplicate)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "vals") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  select(
+    BioReplicate,
+    vals,
+    Group,
+    BioReplicate) %>%
+  filter(!is.na(vals))
+
+df_plot %>% 
+  group_by(BioReplicate, Group) %>%
+  count() %>%
+  ggplot(aes(reorder(BioReplicate, n), n)) +
+  geom_bar(aes(fill = Group), stat = "identity", color = "black") +
+  xlab("Sample") +
+  ylab("Count") +
+  ggtitle("Number of proteins per sample") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, size = 6)) +
+  scale_fill_brewer(palette = "Set2") +
+  geom_text(aes(label = n), vjust = 0.5, hjust = 1.5, angle = 90)
+
+df_plot %>% 
+  group_by(Group) %>%
+  count() %>%
+  ggplot(aes(reorder(Group, n), n)) +
+  geom_bar(aes(fill = Group), stat = "identity", color = "black") +
+  xlab("Sample") +
+  ylab("Count") +
+  ggtitle("Number of proteins per Group") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, size = 6),
+        legend.position = "none") +
+  scale_fill_brewer(palette = "Set2") +
+  geom_text(aes(label = n), vjust = 0.5, hjust = 1.5, angle = 90)
+
+incProgress(2/4)
+```
+
+## Missing values
+
+```{r df.na}
+df.isna <- df %>%
+  select_if(is.numeric) %>%
+  gather(key = "BioReplicate", value = "val") %>%
+  mutate(isna = is.na(val)) %>%
+  group_by(BioReplicate) %>%
+  mutate(total = n()) %>%
+  group_by(BioReplicate, total, isna) %>%
+  summarise(num.isna = n()) %>%
+  mutate(pct = num.isna / total * 100) %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  select(BioReplicate, total, isna, num.isna, pct, Group)
+```
+
+The samples present with a median of `r round(median(df.isna$pct[which(df.isna$isna == TRUE)], na.rm = TRUE), 1)`% missing value rate:
+
+```{r plot.na}
+
+levels <- (df.isna %>% filter(isna == T) %>% arrange(desc(pct)))$BioReplicate
+
+df.isna %>%
+  ggplot() +
+  geom_bar(aes(x = reorder(BioReplicate, -pct), y = pct, fill = isna),
+           stat = "identity", alpha = 0.8
+  ) +
+  scale_fill_manual(
+    name = "",
+    values = c("gray43", "mediumpurple1"),
+    labels = c("Present", "Missing")
+  ) +
+  coord_flip() +
+  labs(x = "Samples", y = "% of missing values") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 6)) +
+  scale_x_discrete(labels = levels, limits = levels) +
+  geom_text(
+    aes(x = reorder(BioReplicate, -pct), y = pct, label = round(pct, 2)), 
+    hjust = .3, size = 2.5,
+    position = position_dodge(width = 1),
+    inherit.aes = TRUE
+  )
+```
+
+Additionally, a heatmap based on the missing values is created:
+
+```{r heatmap.na}
+plot_na <- df %>%
+  select_if(is.numeric) %>%
+  mutate_all(list(~ ifelse(is.na(.), 0, 1)))
+
+
+
+my_sample_col <- data.frame(Group = metadata$Group)
+
+
+
+if (identical(metadata$BioReplicate, colnames(plot_na))){
+  
+  rownames(my_sample_col) <- metadata$BioReplicate
+  
+}
+
+
+fig.4 <- as.ggplot(
+    pheatmap(plot_na,
+           color = c("skyblue", "grey"),
+           show_rownames = FALSE,
+           fontsize_col = 6,
+           annotation_col = my_sample_col)
+    )
+
+```
+
+## Sample distributions
+
+Boxplot and density plots show the distribution of the data.
+
+```{r distribution}
+df %>%
+  select(Protein.Ids, which(plyr::colwise(is.numeric)(.) == TRUE)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "counts") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  ggplot(aes(x = BioReplicate, y = counts, fill = Group)) +
+  geom_boxplot() +
+  labs(y = "Log2 of abundance", x = "Samples") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 6))
+
+# Density plot
+
+df %>%
+  select(Protein.Ids, which(plyr::colwise(is.numeric)(.) == TRUE)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "counts") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  ggplot(aes(x = counts, color = Group)) +
+  geom_density() +
+  labs(y = "Log2 of abundance", x = "") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, size = 6))
+
+incProgress(3/4)
+```
+
+## Coefficients of variation (CVs)
+
+The percentage of CV is plotted against the protein log2 abundance. The former is usually dependent upon protein mean abundance in proteomics experiments. CVs under 20% qualifies as good quality data, but most of them should be under 10%.
+
+```{r cv}
+cv.mean <- df %>% 
+  select_if(is.numeric) %>% 
+  mutate(mean = rowMeans(., na.rm = TRUE)) %>% 
+  select(mean)
+
+cv <- apply(select_if(df, is.numeric), 1, function(x){
+  
+  sd <- sd(x, na.rm = TRUE)
+  m <- mean(x, na.rm = TRUE)
+  
+  cv <- sd/m*100
+  
+  return(cv)
+  
+})
+
+cv.df <- data.frame(Protein.Ids = df$Protein.Ids,
+                    logmean = cv.mean$mean,
+                    cv = cv)
+
+cv.df %>% 
+  ggplot(aes(logmean, cv)) +
+  geom_point() +
+  theme_classic() +
+  xlab("Log2 protein abundance") + ylab("% coefficient of variation") +
+  geom_smooth(method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)
+```
+
+## Venn diagram
+
+Lastly, a venn diagram to see the overlap among the groups:
+
+```{r qc.venn}
+# Venn diagram
+  
+  df2 <- df %>% 
+    select(Protein.Ids,
+           matches(metadata$BioReplicate)) %>% 
+    pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "vals") %>% 
+    na.omit() %>% 
+    inner_join(metadata, by = "BioReplicate")
+  
+  
+  
+  list.group <- list()
+  
+  for (i in 1:length(levels(as.factor(df2$Group)))){
+    
+    list.group[[i]] <- unique(df2$Protein.Ids[df2$Group == levels(as.factor(df2$Group))[i]])
+    
+    names(list.group)[i] <- levels(as.factor(df2$Group))[i]
+    
+  }
+
+venn::venn(list.group, zcolor = "style", ggplot = TRUE)
+
+```
+
+
+# Data filtering based on NAs
+
+One important step is to filter the dataset based on NAs, so that the low quality proteins are not fed to the downstream analysis. An arbitraty threshold has to be set. 70% is usually the one to use (although it depends on the data), meaning that proteins that have more than 30% of NAs across all samples are filtered out / removed from the analysis. 
+
+Here, a `r params$filter * 100`% filter was applied.
+
+```{r na.filt}
+
+df.filt <- df %>%
+  mutate(filt = case_when(
+    rowSums(!is.na(across(where(is.numeric)))) / ncol(across(where(is.numeric))) >= params$filter ~ TRUE,
+    TRUE ~ FALSE
+  )) %>%
+  filter(filt == TRUE) %>%
+  select(-filt)
+```
+
+
+As a result, `r dim(df)[1] - dim(df.filt)[1]` low-quality proteins were removed.
+
+```{r show.nafilt}
+
+df.filt
+```
+
+# Normalization
+
+A median normalization approach was used:
+
+```{r norm}
+prots <- df.filt %>%
+  select_if(is.character)
+
+normData <- select_if(df.filt, is.numeric)
+
+medianNorm <- function(logDat) {
+  # Find medians of each sample
+  # Divide by median
+  # Multiply by mean of medians
+  sampleMed <- apply(logDat, 2, median, na.rm=TRUE)
+  meanMed <- mean(sampleMed, na.rm=TRUE)
+  out <- t(t(logDat) / sampleMed)
+  out <- out * meanMed
+  return(as.matrix(out))
+}
+
+df.norm <- as.data.frame(medianNorm(normData))
+
+df.norm <- cbind(prots, df.norm)
+
+# Boxplots
+
+p1 <- df.filt %>%
+  select(Protein.Ids, which(plyr::colwise(is.numeric)(.) == TRUE)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "counts") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  ggplot(aes(x = BioReplicate, y = counts, fill = Group)) +
+  geom_boxplot() +
+  labs(y = "Log2 of abundance", x = "Samples") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 6))
+
+p2 <- df.norm %>%
+  select(Protein.Ids, which(plyr::colwise(is.numeric)(.) == TRUE)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "counts") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  ggplot(aes(x = BioReplicate, y = counts, fill = Group)) +
+  geom_boxplot() +
+  labs(y = "Log2 of abundance", x = "Samples") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 6))
+
+fig <- ggpubr::ggarrange(p1, p2, labels = c("Pre-normalization", "Post-normalization"),
+                         common.legend = TRUE, legend = "bottom")
+fig
+```
+
+# Imputation
+
+In addition, since the differential expression model does not work with missing values, an imputation of NAs previous to that step is necessary. Since the percentage of MVs is usually quite low in DIA - TimsTOF data, this imputation should not introduce distorting artifacts to the downstream analysis. In this case, the QRILC method was used, a missing data imputation method that performs the imputation of left-censored missing data using random draws from a truncated distribution with parameters estimated using quantile regression.
+
+This kind of imputation assumes that the MVs are due to the fact that these peptides either do not exist in the sample, or that they were so low abundance that they fell under the detection limit of the mass spec; and thus, if they were to be detected, they would fall in the left side of the distribution. This can be seen in the before and after density plots.
+
+```{r imp}
+df.imp <- select_if(df.norm, is.numeric)
+
+set.seed(42)
+
+df.imp <- as.data.frame(imputeLCMD::impute.QRILC(df.imp)[[1]])
+
+
+df.imp <- cbind(prots, df.imp)
+
+# Density plots
+
+h3 <- df.norm %>%
+  select(Protein.Ids, which(plyr::colwise(is.numeric)(.) == TRUE)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "counts") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  ggplot(aes(x = counts, color = Group)) +
+  geom_density() +
+  labs(y = "Log2 of abundance", x = "") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 60, vjust = 0.5, size = 12),
+    legend.position = "bottom"
+  )
+
+
+
+h4 <- df.imp %>%
+  select(Protein.Ids, which(plyr::colwise(is.numeric)(.) == TRUE)) %>%
+  pivot_longer(!Protein.Ids, names_to = "BioReplicate", values_to = "counts") %>%
+  left_join(metadata, by = "BioReplicate") %>%
+  ggplot(aes(x = counts, color = Group)) +
+  geom_density() +
+  labs(y = "Log2 of abundance", x = "") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 60, vjust = 0.5, size = 12),
+    legend.position = "bottom"
+  )
+
+fig.den2 <- ggpubr::ggarrange(h3, h4, labels = c("Pre-imputation", "Post-imputation"),
+                             common.legend = TRUE)
+fig.den2
+```
+
+# Principal component analysis (PCAs)
+
+Plotting a PCA from the imputed data:
+
+```{r pca}
+pca_prot <- function(df, meta, var_p, scale = FALSE, labels = "point"){
+  
+  df <- na.exclude(df)
+  
+  tt <- as.data.frame(t(select_if(df, is.numeric)))
+  
+  tt <- tt %>%
+    mutate(BioReplicate = rownames(.)) %>%
+    inner_join(meta, by = "BioReplicate")
+  
+  rownames(tt) <- colnames(select_if(df, is.numeric))
+  
+  res.pca <- prcomp(select_if(tt, is.numeric), scale = FALSE)
+  
+  fviz_pca_ind(res.pca,
+               geom.ind = labels,
+               habillage = tt[[var_p]],
+               legend.title = "", title = "",
+               invisible = "quali",
+               pointsize = 4,
+               pointshape = 19
+  ) +
+    theme_classic() +
+    theme(legend.title = element_blank()) +
+    scale_fill_brewer(palette = "Set2")
+  
+}
+
+pca_prot(df.imp, metadata, var_p = "Group")
+
+```
+
+# Differential expression (DE) analysis
+
+For the DE analysis, the Bioconductor package `limma` was used. In the table below, it can be seen the number of up and down-regulated proteins, depending on the comparison:
+
+```{r de}
+
+comp <- read_excel(params$comp)
+
+if (nrow(comp) == 1){
+    
+    comp <- as.data.frame(t(data.frame(apply(comp, 2, make.names))))
+    
+    rownames(comp) <- NULL
+    
+  } else {
+    
+    comp <- as_tibble(apply(comp, 2, make.names))
+    
+  }
+
+comp.v <- comp %>% 
+  mutate(comp = str_c(Condition, Control, sep = "-")) %>% 
+  select(comp) %>% 
+  pull()
+
+rownames(df.imp) <- df.imp$Protein.Ids
+
+anno <- rownames(df.imp)
+
+# Model
+mod <- model.matrix(~0 + as.factor(Group), data = metadata)
+rownames(mod) <- colnames(select_if(df.imp, is.numeric))
+
+colnames(mod) <- sort(unique(metadata$Group))
+
+
+# We use limma::lmFit to fit the model Fit the model
+fit <- lmFit(select_if(df.imp, is.numeric), mod)
+
+# Comparisons
+contrast.matrix <- makeContrasts(contrasts = comp.v,
+                                 levels = mod)
+
+
+# Fit the comparisons
+fit2 <- contrasts.fit(fit, contrast.matrix)
+
+# Test these coefficients being != 0 with limma::eBayes
+fit2 <- eBayes(fit2)
+
+# Check the results for coefficients != 0
+summary(decideTests(fit2))
+
+```
+
+```{r toptable}
+res <- as.data.frame(summary(decideTests(fit2)))
+
+res.sig <- res %>% 
+  filter(Var1 == "NotSig") %>% 
+  mutate(sig = case_when(Freq == dim(df.imp)[1] ~ "nosig",
+                         TRUE ~ "sig")) %>% 
+  filter(sig == "sig") %>% 
+  pull(Var2) %>% 
+  as.character()
+
+list.res <- list()
+
+for (i in 1:length(res.sig)){
+  
+  df.all <- topTable(fit2, coef = match(res.sig[i], comp.v), number = Inf, genelist = as.data.frame(anno))
+  
+  list.res[[i]] <- df.all
+  
+  names(list.res)[i] <- res.sig[i]
+  
+}
+```
+
+
+The same information, but represented as volcano plots:
+
+```{r volcano, fig.height=12}
+
+list.volcanos <- list()
+
+for (i in 1:length(res.sig)){
+  
+  df.all <- list.res[[i]]
+  
+  fig <- as.ggplot(
+    EnhancedVolcano(df.all, lab = rownames(df.all), x = "logFC", 
+                    y = "adj.P.Val", xlim = c(-2,2), ylim = c(0, 2), 
+                    title = res.sig[i], subtitle = "", 
+                    xlab = bquote(~Log[2] ~ "fold change"), 
+                    ylab = bquote(~-Log[10] ~ adjusted ~ italic(P)), pCutoff = 0.05, 
+                    colAlpha = 1, legendPosition = "bottom", legendLabSize = 10, legendIconSize = 3,
+                    caption = "")
+  )
+  
+  list.volcanos[[i]] <- fig
+  
+    
+  
+}
+  
+  
+for (i in 1:length(res.sig)){
+  
+  print(list.volcanos[[i]])
+  
+}
+```
+
+
+```{r res.venn}
+
+# Venn diagram
+  
+  if (length(res.sig) > 1){
+  
+  venn.list <- list()
+  
+  for (i in 1:length(res.sig)){
+    
+    prots <- list.res[[i]] %>% 
+      filter(adj.P.Val < .05) %>% 
+      pull(anno)
+    
+    venn.list[[i]] <- prots
+    
+    names(venn.list)[i] <- gsub("-.*","", res.sig[i])
+    
+  }
+  
+  
+  venn::venn(venn.list, zcolor = "style", ggplot = TRUE)
+  
+  }
+```
+
+Lastly, an enrichment analysis (gene ontology, GO) can be done.
+
+```{r enrichment}
+enrich.list <- list()
+  
+  for (i in seq_along(res.sig)){
+    
+    nlist <- list()
+    
+    df.de <- list.res[[i]] %>% 
+      filter(adj.P.Val < .05)
+    
+    go.cc <- enrichGO(gene = df.de$anno,
+                      universe = df.imp$Protein.Ids,
+                      OrgDb         = org.Hs.eg.db,
+                      keyType       = 'UNIPROT',
+                      ont           = "CC",
+                      pAdjustMethod = "BH",
+                      pvalueCutoff  = 0.01,
+                      qvalueCutoff  = 0.05)
+    
+    if (!is.null(go.cc@result)){
+      
+      go.cc <- go.cc@result
+      
+      nlist[[1]] <- go.cc
+      names(nlist)[1] <- paste0(res.sig[i], "_GO_cc")
+
+    }
+    
+    
+    go.bp <- enrichGO(gene = df.de$anno,
+                      universe = df.imp$Protein.Ids,
+                      OrgDb         = org.Hs.eg.db,
+                      keyType       = 'UNIPROT',
+                      ont           = "BP",
+                      pAdjustMethod = "BH",
+                      pvalueCutoff  = 0.01,
+                      qvalueCutoff  = 0.05)
+    
+    if (!is.null(go.bp@result)){
+
+      go.bp <- go.bp@result
+      nlist[[2]] <- go.bp
+      names(nlist)[2] <- paste0(res.sig[i], "_GO_bp")
+      
+    }
+    
+    go.mf <- enrichGO(gene = df.de$anno,
+                      universe = df.imp$Protein.Ids,
+                      OrgDb         = org.Hs.eg.db,
+                      keyType       = 'UNIPROT',
+                      ont           = "MF",
+                      pAdjustMethod = "BH",
+                      pvalueCutoff  = 0.01,
+                      qvalueCutoff  = 0.05)
+    
+    if (!is.null(go.mf@result)){
+
+      go.mf <- go.mf@result
+      nlist[[3]] <- go.mf
+      names(nlist)[3] <- paste0(res.sig[i], "_GO_mf")
+      
+    }
+    
+    if (length(nlist) > 0){
+      
+      enrich.list[[i]] <- nlist
+      
+    }
+  }
+  
+  
+  enrich.list <- unlist(enrich.list, recursive = FALSE)
+  
+  enrich.list <- enrich.list %>% discard(is.null)
+```
+
+```{r enrichment.figs}
+
+enrich.figs <- list()
+  
+  if (length(enrich.list) > 0){
+  
+  for (i in 1:length(enrich.list)){
+    
+    fig <- enrich_dotplot(enrich.list[[i]], title = names(enrich.list)[i])
+    
+    enrich.figs[[i]] <- fig
+    
+    }
+  }
+
+enrich.figs <- enrich.figs %>% discard(is.null)
+
+for (i in 1:length(enrich.figs)){
+  
+  print(enrich.figs[[i]])
+  
+}
+
+incProgress(4/4)
+```
