@@ -12,7 +12,7 @@ library(BiocManager)
 
 # Import libraries
 
-lib <-  c("shiny", "readxl", "dplyr", "ggplot2", "tidyr", "ggsci", "stringr", "readr", "bslib", "vroom", "conflicted",
+lib <-  c("shiny", "readxl", "dplyr", "ggplot2", "tidyr", "ggsci", "stringr", "readr", "bslib", "vroom",
           "purrr", "tools", "factoextra", "EnhancedVolcano", "limma", "officer", "ggplotify", "reshape2",
           "pheatmap", "imputeLCMD", "org.Hs.eg.db", "clusterProfiler", "venn", "ggpolypath", "RColorBrewer", "enrichplot")
 
