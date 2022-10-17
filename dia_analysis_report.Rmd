@@ -25,10 +25,16 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, cache = TR
 
 ```{r libraries, include=FALSE}
 
-library(readxl)
+library(conflicted)
 library(readr)
 library(vroom)
 library(dplyr)
+conflict_prefer("rename", "dplyr")
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+conflict_prefer("first", "dplyr")
+conflict_prefer("all_of", "dplyr")
+
 library(tidyr)
 library(ggplot2)
 library(pheatmap)
@@ -37,10 +43,9 @@ library(factoextra)
 library(limma)
 library(EnhancedVolcano)
 library(RColorBrewer)
-library(ggvenn)
+library(venn)
 library(org.Hs.eg.db)
 library(clusterProfiler)
-library(eulerr)
 library(stringr)
 library(tools)
 library(enrichplot)
@@ -88,10 +93,16 @@ Load raw data:
 ```{r raw}
 
 ext <- tools::file_ext(params$data_name)
-switch(ext,
-       raw = read_excel(params$data) %>% type_convert(),
-       raw = vroom(params$data, delim = "\t")
-      )
+
+if (ext == "xlsx"){
+  
+  raw <- read_excel(params$data) %>% type_convert()
+  
+} else if (ext == "tsv"){
+  
+  raw <-  vroom(params$data, delim = "\t")
+  
+}
 
 colnames(raw) <- make.names(colnames(raw))
 
