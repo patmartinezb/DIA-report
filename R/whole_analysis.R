@@ -1,7 +1,7 @@
 
 
 
-all_analysis <- function(df, meta, comp, thres){
+all_analysis <- function(df, meta, comp, thres, org){
   
   # This function performs the whole analysis, and generates the figures and tables as lists, so they can be used within the app to generate the excel and pptx
   # The enrich_dotplot() and gen_pptx() can be found in /R
@@ -471,6 +471,16 @@ all_analysis <- function(df, meta, comp, thres){
   
   # Enrichment analysis depending on the results
   
+  if (org == "Human"){
+    
+    org <- org.Hs.eg.db
+    
+  } else {
+    
+    org <- org.Mm.eg.db
+    
+  }
+  
   enrich.list <- list()
   
   for (i in seq_along(res.sig)){
@@ -482,7 +492,7 @@ all_analysis <- function(df, meta, comp, thres){
     
     go.cc <- enrichGO(gene = df.de$anno,
                       universe = df.imp$Protein.Ids,
-                      OrgDb         = org.Hs.eg.db,
+                      OrgDb         = org,
                       keyType       = 'UNIPROT',
                       ont           = "CC",
                       pAdjustMethod = "BH",
@@ -501,7 +511,7 @@ all_analysis <- function(df, meta, comp, thres){
     
     go.bp <- enrichGO(gene = df.de$anno,
                       universe = df.imp$Protein.Ids,
-                      OrgDb         = org.Hs.eg.db,
+                      OrgDb         = org,
                       keyType       = 'UNIPROT',
                       ont           = "BP",
                       pAdjustMethod = "BH",
@@ -518,7 +528,7 @@ all_analysis <- function(df, meta, comp, thres){
     
     go.mf <- enrichGO(gene = df.de$anno,
                       universe = df.imp$Protein.Ids,
-                      OrgDb         = org.Hs.eg.db,
+                      OrgDb         = org,
                       keyType       = 'UNIPROT',
                       ont           = "MF",
                       pAdjustMethod = "BH",
