@@ -11,6 +11,7 @@ output:
     toc_float: yes
 params:
   data: NA
+  org: NA
   data_name: NA
   metadata: NA
   comp: NA
@@ -38,6 +39,7 @@ library(EnhancedVolcano)
 library(RColorBrewer)
 library(venn)
 library(org.Hs.eg.db)
+library(org.Mm.eg.db)
 library(clusterProfiler)
 library(stringr)
 library(tools)
@@ -716,6 +718,18 @@ for (i in 1:length(res.sig)){
 Lastly, an enrichment analysis (gene ontology, GO) can be done.
 
 ```{r enrichment}
+
+if (params$org == "Human"){
+  
+  org <- org.Hs.eg.db
+  
+} else {
+  
+  org <- org.Mm.eg.db
+  
+}
+
+
 enrich.list <- list()
   
   for (i in seq_along(res.sig)){
@@ -727,7 +741,7 @@ enrich.list <- list()
     
     go.cc <- enrichGO(gene = df.de$anno,
                       universe = df.imp$Protein.Ids,
-                      OrgDb         = org.Hs.eg.db,
+                      OrgDb         = org,
                       keyType       = 'UNIPROT',
                       ont           = "CC",
                       pAdjustMethod = "BH",
@@ -746,7 +760,7 @@ enrich.list <- list()
     
     go.bp <- enrichGO(gene = df.de$anno,
                       universe = df.imp$Protein.Ids,
-                      OrgDb         = org.Hs.eg.db,
+                      OrgDb         = org,
                       keyType       = 'UNIPROT',
                       ont           = "BP",
                       pAdjustMethod = "BH",
@@ -763,7 +777,7 @@ enrich.list <- list()
     
     go.mf <- enrichGO(gene = df.de$anno,
                       universe = df.imp$Protein.Ids,
-                      OrgDb         = org.Hs.eg.db,
+                      OrgDb         = org,
                       keyType       = 'UNIPROT',
                       ont           = "MF",
                       pAdjustMethod = "BH",

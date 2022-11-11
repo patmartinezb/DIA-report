@@ -14,7 +14,8 @@ library(BiocManager)
 
 lib <-  c("shiny", "readxl", "dplyr", "ggplot2", "tidyr", "ggsci", "stringr", "readr", "bslib", "vroom",
           "purrr", "tools", "factoextra", "EnhancedVolcano", "limma", "officer", "ggplotify", "reshape2",
-          "pheatmap", "imputeLCMD", "org.Hs.eg.db", "clusterProfiler", "venn", "ggpolypath", "RColorBrewer", "enrichplot")
+          "pheatmap", "imputeLCMD", "org.Hs.eg.db", "org.Mm.eg.db", "clusterProfiler", "venn", 
+          "ggpolypath", "RColorBrewer", "enrichplot")
 
 
 # Checking missing packages from list
@@ -41,6 +42,7 @@ ui <- fluidPage(
              br(),
              fileInput("file", "Upload data (.xlsx/.tsv):", buttonLabel = "Upload data", 
                        multiple = FALSE, accept = c(".tsv", ".xlsx")),
+             radioButtons("org", "Organism:", choices = c("Human", "Mice"), selected = "Human"),
              hr(),
              fileInput("meta", "Upload metadata (.xlsx):", buttonLabel = "Upload metadata", 
                        multiple = FALSE, accept = ".xlsx"),
@@ -213,7 +215,7 @@ ui <- fluidPage(
       req(input$meta)
       req(input$comp)
       
-      list <- all_analysis(data2(), metadata2(), comp(), thres = input$slider)
+      list <- all_analysis(data2(), metadata2(), comp(), thres = input$slider, org = input$org)
       return(list)
       
     })
@@ -257,6 +259,7 @@ ui <- fluidPage(
 
         # Set up parameters to pass to Rmd document
         params <- list(data = input$file$datapath,
+                       org = input$org,
                        data_name = input$file$name,
                        metadata = input$meta$datapath,
                        comp = input$comp$datapath,
