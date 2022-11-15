@@ -42,7 +42,7 @@ ui <- fluidPage(
              br(),
              fileInput("file", "Upload data (.xlsx/.tsv):", buttonLabel = "Upload data", 
                        multiple = FALSE, accept = c(".tsv", ".xlsx")),
-             radioButtons("org", "Organism:", choices = c("Human", "Mice"), selected = "Human"),
+             radioButtons("org", "Organism:", choices = c("Human", "Mouse"), selected = "Human"),
              hr(),
              fileInput("meta", "Upload metadata (.xlsx):", buttonLabel = "Upload metadata", 
                        multiple = FALSE, accept = ".xlsx"),
