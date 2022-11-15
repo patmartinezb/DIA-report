@@ -499,7 +499,7 @@ all_analysis <- function(df, meta, comp, thres, org){
                       pvalueCutoff  = 0.01,
                       qvalueCutoff  = 0.05)
     
-    if (!is.null(go.cc@result)){
+    if (!is.null(go.cc)){
       
       go.cc <- go.cc@result
       
@@ -518,7 +518,7 @@ all_analysis <- function(df, meta, comp, thres, org){
                       pvalueCutoff  = 0.01,
                       qvalueCutoff  = 0.05)
     
-    if (!is.null(go.bp@result)){
+    if (!is.null(go.bp)){
 
       go.bp <- go.bp@result
       nlist[[2]] <- go.bp
@@ -535,7 +535,7 @@ all_analysis <- function(df, meta, comp, thres, org){
                       pvalueCutoff  = 0.01,
                       qvalueCutoff  = 0.05)
     
-    if (!is.null(go.mf@result)){
+    if (!is.null(go.mf)){
 
       go.mf <- go.mf@result
       nlist[[3]] <- go.mf
