@@ -392,7 +392,24 @@ all_analysis <- function(df, meta, comp, thres, org){
   fit2 <- eBayes(fit2)
 
 
-  # Get results
+  # Get results:
+  
+  # Everything
+  
+  list.res.all <- list()
+  
+  for (i in 1:length(comp.v)){
+    
+    df.all <- topTable(fit2, coef = i, number = Inf, genelist = as.data.frame(anno))
+    
+    list.res.all[[i]] <- df.all
+    
+    names(list.res.all)[i] <- comp.v[i]
+    
+  }
+  
+  
+  # Only DE proteins per comparison
   res <- as.data.frame(summary(decideTests(fit2)))
   
   res.sig <- res %>% 
@@ -406,15 +423,15 @@ all_analysis <- function(df, meta, comp, thres, org){
   
   # Obtain results dfs depending on the number of comparisons - coef argument 
   
-  list.res <- list()
+  list.res.sig <- list()
   
   for (i in 1:length(res.sig)){
     
     df.all <- topTable(fit2, coef = match(res.sig[i], comp.v), number = Inf, genelist = as.data.frame(anno))
     
-    list.res[[i]] <- df.all
+    list.res.sig[[i]] <- df.all
     
-    names(list.res)[i] <- res.sig[i]
+    names(list.res.sig)[i] <- res.sig[i]
     
   }
   
@@ -424,7 +441,7 @@ all_analysis <- function(df, meta, comp, thres, org){
   
   for (i in 1:length(res.sig)){
     
-    df.all <- list.res[[i]]
+    df.all <- list.res.sig[[i]]
     
     fig <- as.ggplot(
       EnhancedVolcano(df.all, lab = rownames(df.all), x = "logFC", 
@@ -448,7 +465,7 @@ all_analysis <- function(df, meta, comp, thres, org){
   
   for (i in 1:length(res.sig)){
     
-    prots <- list.res[[i]] %>% 
+    prots <- list.res.sig[[i]] %>% 
       filter(adj.P.Val < .05) %>% 
       pull(anno)
     
@@ -487,7 +504,7 @@ all_analysis <- function(df, meta, comp, thres, org){
     
     nlist <- list()
     
-    df.de <- list.res[[i]] %>% 
+    df.de <- list.res.sig[[i]] %>% 
       filter(adj.P.Val < .05)
     
     go.cc <- enrichGO(gene = df.de$anno,
@@ -578,11 +595,17 @@ all_analysis <- function(df, meta, comp, thres, org){
                 norm = df.norm,
                 norm_imputed = df.imp)
   
-  if (length(list.res) > 0){
+  if (length(list.res.all) > 0){
     
-    listy <- append(listy, list.res)
+    listy <- append(listy, list.res.all)
     
   }
+  
+  # if (length(list.res.sig) > 0){
+  #   
+  #   listy <- append(listy, list.res.sig)
+  #   
+  # }
   
   if (length(enrich.list) > 0){
     
